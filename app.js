@@ -5,7 +5,7 @@ const cors = require('cors');
 const slugify = require('slugify');
 
 const app = express();
-const PORT = 4000;
+const PORT = 4500;
 
 app.use(bodyParser.json());
 app.use(cors());
@@ -29,7 +29,9 @@ CategorySchema.pre('validate', async function(next) {
         const baseSlug = slugify(this.title, { lower: true, strict: true });
         let uniqueSlug = baseSlug;
 
-        const CategoryModel = mongoose.model('Category', CategorySchema, 'categories');
+        const domain = this.domain; // El dominio se pasará como parte del documento
+        const collectionName = getCollectionName(domain);
+        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
 
         let slugExists = await CategoryModel.findOne({ slug: uniqueSlug });
         let counter = 2;
@@ -44,12 +46,24 @@ CategorySchema.pre('validate', async function(next) {
     next();
 });
 
+// Función para obtener el nombre de la colección basado en el dominio
+function getCollectionName(domain) {
+    return `categories-${domain}`;
+}
+
 // Rutas de la API
 
 // Obtener todas las categorías
 app.get('/api/categories', async (req, res) => {
     try {
-        const categories = await mongoose.model('Category', CategorySchema, 'categories').find({});
+        const domain = req.headers['domain'];
+        if (!domain) {
+            return res.status(400).json({ message: 'Domain header is required' });
+        }
+        const collectionName = getCollectionName(domain);
+        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+
+        const categories = await CategoryModel.find({});
         res.json(categories);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -59,7 +73,14 @@ app.get('/api/categories', async (req, res) => {
 // Obtener una categoría por ID
 app.get('/api/categories/:id', async (req, res) => {
     try {
-        const category = await mongoose.model('Category', CategorySchema, 'categories').findById(req.params.id);
+        const domain = req.headers['domain'];
+        if (!domain) {
+            return res.status(400).json({ message: 'Domain header is required' });
+        }
+        const collectionName = getCollectionName(domain);
+        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+
+        const category = await CategoryModel.findById(req.params.id);
 
         if (!category) {
             return res.status(404).json({ message: 'Category not found' });
@@ -72,8 +93,15 @@ app.get('/api/categories/:id', async (req, res) => {
 
 // Crear una nueva categoría
 app.post('/api/categories', async (req, res) => {
-    const CategoryModel = mongoose.model('Category', CategorySchema, 'categories');
+    const domain = req.headers['domain'];
+    if (!domain) {
+        return res.status(400).json({ message: 'Domain header is required' });
+    }
+    const collectionName = getCollectionName(domain);
+    const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+
     const category = new CategoryModel(req.body);
+    category.domain = domain; // Añadimos el dominio al documento
 
     try {
         const newCategory = await category.save();
@@ -86,7 +114,14 @@ app.post('/api/categories', async (req, res) => {
 // Obtener una categoría por slug
 app.get('/api/categories/slug/:slug', async (req, res) => {
     try {
-        const category = await mongoose.model('Category', CategorySchema, 'categories').findOne({ slug: req.params.slug });
+        const domain = req.headers['domain'];
+        if (!domain) {
+            return res.status(400).json({ message: 'Domain header is required' });
+        }
+        const collectionName = getCollectionName(domain);
+        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+
+        const category = await CategoryModel.findOne({ slug: req.params.slug });
 
         if (!category) {
             return res.status(404).json({ message: 'Category not found' });
@@ -100,7 +135,14 @@ app.get('/api/categories/slug/:slug', async (req, res) => {
 // Eliminar una categoría por ID
 app.delete('/api/categories/:id', async (req, res) => {
     try {
-        const category = await mongoose.model('Category', CategorySchema, 'categories').findById(req.params.id);
+        const domain = req.headers['domain'];
+        if (!domain) {
+            return res.status(400).json({ message: 'Domain header is required' });
+        }
+        const collectionName = getCollectionName(domain);
+        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+
+        const category = await CategoryModel.findById(req.params.id);
 
         if (!category) {
             return res.status(404).json({ message: 'Category not found' });
