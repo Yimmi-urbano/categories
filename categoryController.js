@@ -99,9 +99,41 @@ const deleteCategoryById = async (req, res) => {
     }
 };
 
+// Controlador para actualizar una categoría por ID
+const updateCategory = async (req, res) => {
+    try {
+        const domain = req.headers['domain'];
+        if (!domain) {
+            return res.status(400).json({ message: 'Domain header is required' });
+        }
+        const collectionName = getCollectionName(domain);
+        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+
+        // Encontrar la categoría existente por ID
+        const category = await CategoryModel.findById(req.params.id);
+
+        if (!category) {
+            return res.status(404).json({ message: 'Category not found' });
+        }
+
+        // Actualizar los campos de la categoría con los datos proporcionados
+        Object.assign(category, req.body);
+        
+        // Guardar los cambios
+        await category.save();
+
+        // Devolver la categoría actualizada
+        res.json(category);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+
 module.exports = {
     getCategoriesHierarchy,
     getCategoryById,
     createCategory,
+    updateCategory,
     deleteCategoryById
 };
