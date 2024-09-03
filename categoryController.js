@@ -3,16 +3,28 @@ const { CategorySchema, getCollectionName } = require('./models/Category');
 
 // Función para obtener una categoría con sus subcategorías
 const getCategoryHierarchy = async (parentId, CategoryModel) => {
-    const categories = await CategoryModel.find({ parent: parentId });
+    // Obtener todas las categorías
+    const categories = await CategoryModel.find();
 
-    // Para cada categoría, obtenemos sus subcategorías de manera recursiva
-    const categoryHierarchy = await Promise.all(categories.map(async category => {
-        const children = await getCategoryHierarchy(category._id, CategoryModel);
-        return {
-            ...category.toObject(),
-            children
-        };
-    }));
+    // Construir un mapa de categorías por ID para fácil acceso
+    const categoryMap = {};
+    categories.forEach(cat => {
+        categoryMap[cat._id] = { ...cat.toObject(), children: [] };
+    });
+
+    // Construir la jerarquía
+    const categoryHierarchy = [];
+    categories.forEach(category => {
+        // Validar si el padre de la categoría existe en el mapa
+        if (category.parent === parentId) {
+            categoryHierarchy.push(categoryMap[category._id]);
+        } else if (category.parent && categoryMap[category.parent]) {
+            categoryMap[category.parent].children.push(categoryMap[category._id]);
+        } else if (category.parent) {
+            // El padre no existe en el mapa, tratar la categoría como raíz
+            categoryHierarchy.push(categoryMap[category._id]);
+        }
+    });
 
     return categoryHierarchy;
 };
@@ -24,16 +36,23 @@ const getCategoriesHierarchy = async (req, res) => {
         if (!domain) {
             return res.status(400).json({ message: 'Domain header is required' });
         }
+
         const collectionName = getCollectionName(domain);
+        if (!collectionName) {
+            return res.status(400).json({ message: 'Invalid domain' });
+        }
+
         const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
 
         // Obtener la jerarquía comenzando desde el nivel superior (sin parent)
         const hierarchy = await getCategoryHierarchy(null, CategoryModel);
         res.json(hierarchy);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Error fetching category hierarchy:', error); // Añadir logging para depuración
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 };
+
 
 // Controlador para obtener una categoría por ID
 const getCategoryById = async (req, res) => {
@@ -118,7 +137,7 @@ const updateCategory = async (req, res) => {
 
         // Actualizar los campos de la categoría con los datos proporcionados
         Object.assign(category, req.body);
-        
+
         // Guardar los cambios
         await category.save();
 
