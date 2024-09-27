@@ -1,44 +1,50 @@
 const mongoose = require('mongoose');
 const slugify = require('slugify');
 
-// Define el esquema de la categoría
+// Define the category schema with a domain and an array of categories
 const CategorySchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    icon_url: { type: String },
-    slug: { type: String, unique: true },
-    parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null }, // Referencia a la categoría padre
-    productCount: { type: Number, default: 0 } // Cantidad de productos en esta categoría
+    domain: { type: String, required: true, unique: true },
+    categories: [
+        {
+            title: { type: String, required: true },
+            icon_url: { type: String },
+            slug: { type: String, unique: true },
+            parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Categories', default: null }, // Reference to the parent category
+            productCount: { type: Number, default: 0 } // Number of products in this category
+        }
+    ]
 });
 
-// Middleware para generar y asegurar unicidad del slug antes de guardar
-CategorySchema.pre('validate', async function(next) {
-    if (this.isModified('title') || this.isNew) {
-        const baseSlug = slugify(this.title, { lower: true, strict: true });
+// Middleware to generate and ensure uniqueness of the slug in categories before saving
+CategorySchema.pre('validate', async function (next) {
+    const categoryPromises = this.categories.map(async (category) => {
+        const baseSlug = slugify(category.title, { lower: true, strict: true });
         let uniqueSlug = baseSlug;
+        let counter = 1;
 
-        const domain = this.domain; // El dominio se pasará como parte del documento
-        const collectionName = getCollectionName(domain);
-        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+        // Check if the slug already exists in the database
+        let existingCategory = await this.constructor.findOne({
+            domain: this.domain,
+            'categories.slug': uniqueSlug
+        });
 
-        let slugExists = await CategoryModel.findOne({ slug: uniqueSlug });
-        let counter = 2;
-
-        while (slugExists) {
+        // Increment slug if it already exists
+        while (existingCategory) {
             uniqueSlug = `${baseSlug}-${counter}`;
-            slugExists = await CategoryModel.findOne({ slug: uniqueSlug });
+            existingCategory = await this.constructor.findOne({
+                domain: this.domain,
+                'categories.slug': uniqueSlug
+            });
             counter++;
         }
-        this.slug = uniqueSlug;
-    }
+
+        // Assign the unique slug to the category
+        category.slug = uniqueSlug;
+    });
+
+    // Wait for all slug generation to complete
+    await Promise.all(categoryPromises);
     next();
 });
 
-// Función para obtener el nombre de la colección basado en el dominio
-function getCollectionName(domain) {
-    return `categories-${domain}`;
-}
-
-module.exports = {
-    CategorySchema,
-    getCollectionName
-};
+module.exports = mongoose.model('Categories', CategorySchema);

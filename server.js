@@ -15,7 +15,7 @@ app.use(bodyParser.json());
 app.use(cors());
 
 // Conexión a MongoDB
-mongoose.connect('mongodb+srv://data_user:wY1v50t8fX4lMA85@cluster0.entyyeb.mongodb.net/categories', {
+mongoose.connect('mongodb+srv://data_user:wY1v50t8fX4lMA85@cluster0.entyyeb.mongodb.net/data-creceidea', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 });

@@ -1,35 +1,11 @@
 const mongoose = require('mongoose');
-const { CategorySchema, getCollectionName } = require('./models/Category');
+const slugify = require('slugify');  // Ensure slugify is required
+const { CategorySchema } = require('./models/Category');
 
-// Función para obtener una categoría con sus subcategorías
-const getCategoryHierarchy = async (parentId, CategoryModel) => {
-    // Obtener todas las categorías
-    const categories = await CategoryModel.find();
+// Define a fixed model for the Category collection
+const CategoryModel = mongoose.model('Categories', CategorySchema, 'categories');
 
-    // Construir un mapa de categorías por ID para fácil acceso
-    const categoryMap = {};
-    categories.forEach(cat => {
-        categoryMap[cat._id] = { ...cat.toObject(), children: [] };
-    });
-
-    // Construir la jerarquía
-    const categoryHierarchy = [];
-    categories.forEach(category => {
-        // Validar si el padre de la categoría existe en el mapa
-        if (category.parent === parentId) {
-            categoryHierarchy.push(categoryMap[category._id]);
-        } else if (category.parent && categoryMap[category.parent]) {
-            categoryMap[category.parent].children.push(categoryMap[category._id]);
-        } else if (category.parent) {
-            // El padre no existe en el mapa, tratar la categoría como raíz
-            categoryHierarchy.push(categoryMap[category._id]);
-        }
-    });
-
-    return categoryHierarchy;
-};
-
-// Controlador para el endpoint de jerarquía
+// Controller to get the category hierarchy
 const getCategoriesHierarchy = async (req, res) => {
     try {
         const domain = req.headers['domain'];
@@ -37,117 +13,167 @@ const getCategoriesHierarchy = async (req, res) => {
             return res.status(400).json({ message: 'Domain header is required' });
         }
 
-        const collectionName = getCollectionName(domain);
-        if (!collectionName) {
-            return res.status(400).json({ message: 'Invalid domain' });
+        // Find the category document for the given domain
+        const categoryDoc = await CategoryModel.findOne({ domain });
+
+        if (!categoryDoc) {
+            return res.status(404).json({ message: 'No categories found for this domain' });
         }
 
-        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
+        const categories = categoryDoc.categories;
 
-        // Obtener la jerarquía comenzando desde el nivel superior (sin parent)
-        const hierarchy = await getCategoryHierarchy(null, CategoryModel);
-        res.json(hierarchy);
+        // Build the hierarchy based on the parent-child relationship
+        const categoryMap = {};
+        categories.forEach(cat => {
+            categoryMap[cat._id] = { ...cat.toObject(), children: [] };
+        });
+
+        const categoryHierarchy = [];
+        categories.forEach(category => {
+            if (category.parent === null) {
+                categoryHierarchy.push(categoryMap[category._id]);
+            } else if (category.parent && categoryMap[category.parent]) {
+                categoryMap[category.parent].children.push(categoryMap[category._id]);
+            }
+        });
+
+        res.json(categoryHierarchy); // Send the hierarchical categories as a response
     } catch (error) {
-        console.error('Error fetching category hierarchy:', error); // Añadir logging para depuración
+        console.error('Error fetching category hierarchy:', error);
         res.status(500).json({ message: 'Internal Server Error' });
     }
 };
 
-
-// Controlador para obtener una categoría por ID
+// Controller to get a category by ID
 const getCategoryById = async (req, res) => {
     try {
         const domain = req.headers['domain'];
         if (!domain) {
             return res.status(400).json({ message: 'Domain header is required' });
         }
-        const collectionName = getCollectionName(domain);
-        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
 
-        const category = await CategoryModel.findById(req.params.id).populate('parent');
+        const categoryDoc = await CategoryModel.findOne({ 'categories._id': req.params.id, domain });
 
-        if (!category) {
+        if (!categoryDoc) {
             return res.status(404).json({ message: 'Category not found' });
         }
-        res.json(category);
+
+        // Find the specific category from the categories array
+        const foundCategory = categoryDoc.categories.id(req.params.id);
+        res.json(foundCategory);
     } catch (error) {
+        console.error('Error fetching category by ID:', error);
         res.status(500).json({ message: error.message });
     }
 };
 
-// Controlador para crear una nueva categoría
+// Controller to create a new category
 const createCategory = async (req, res) => {
     try {
         const domain = req.headers['domain'];
         if (!domain) {
             return res.status(400).json({ message: 'Domain header is required' });
         }
-        const collectionName = getCollectionName(domain);
-        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
 
-        const category = new CategoryModel(req.body);
-        category.domain = domain; // Añadimos el dominio al documento
+        const { title, icon_url, parent, productCount = 0 } = req.body;
+        
+        if (!title) {
+            return res.status(400).json({ message: 'Title is required' });
+        }
 
-        const newCategory = await category.save();
-        res.status(201).json(newCategory);
+        // Generate the base slug from the title
+        const baseSlug = slugify(title, { lower: true, strict: true });
+        let uniqueSlug = baseSlug;
+        let counter = 1;
+
+        // Check for existing slugs in the same domain
+        let existingCategory = await CategoryModel.findOne({
+            domain,
+            'categories.slug': uniqueSlug
+        });
+
+        // Increment slug if it already exists
+        while (existingCategory) {
+            uniqueSlug = `${baseSlug}-${counter}`;
+            existingCategory = await CategoryModel.findOne({
+                domain,
+                'categories.slug': uniqueSlug
+            });
+            counter++;
+        }
+
+        // Create the new category object
+        const newCategory = {
+            title,
+            icon_url,
+            slug: uniqueSlug,  // Use the generated unique slug
+            parent: parent || null,
+            productCount
+        };
+
+        // Update the Category collection
+        const category = await CategoryModel.findOneAndUpdate(
+            { domain },
+            { $push: { categories: newCategory } },
+            { new: true, upsert: true }
+        );
+
+        res.status(201).json(category);
     } catch (error) {
+        console.error('Error creating category:', error);
         res.status(400).json({ message: error.message });
     }
 };
 
-// Controlador para eliminar una categoría por ID
+// Controller to delete a category by ID
 const deleteCategoryById = async (req, res) => {
     try {
         const domain = req.headers['domain'];
         if (!domain) {
             return res.status(400).json({ message: 'Domain header is required' });
         }
-        const collectionName = getCollectionName(domain);
-        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
 
-        const category = await CategoryModel.findById(req.params.id);
+        const category = await CategoryModel.findOneAndUpdate(
+            { domain },
+            { $pull: { categories: { _id: req.params.id } } },
+            { new: true }
+        );
 
         if (!category) {
             return res.status(404).json({ message: 'Category not found' });
         }
 
-        await category.deleteOne();
         res.json({ message: 'Category deleted successfully' });
     } catch (error) {
+        console.error('Error deleting category:', error);
         res.status(500).json({ message: error.message });
     }
 };
 
-// Controlador para actualizar una categoría por ID
+// Controller to update a category by ID
 const updateCategory = async (req, res) => {
     try {
         const domain = req.headers['domain'];
         if (!domain) {
             return res.status(400).json({ message: 'Domain header is required' });
         }
-        const collectionName = getCollectionName(domain);
-        const CategoryModel = mongoose.model('Category', CategorySchema, collectionName);
 
-        // Encontrar la categoría existente por ID
-        const category = await CategoryModel.findById(req.params.id);
+        const updatedCategory = await CategoryModel.findOneAndUpdate(
+            { domain, 'categories._id': req.params.id },
+            { $set: { 'categories.$': req.body } },
+            { new: true }
+        );
 
-        if (!category) {
+        if (!updatedCategory) {
             return res.status(404).json({ message: 'Category not found' });
         }
 
-        // Actualizar los campos de la categoría con los datos proporcionados
-        Object.assign(category, req.body);
-
-        // Guardar los cambios
-        await category.save();
-
-        // Devolver la categoría actualizada
-        res.json(category);
+        res.json(updatedCategory);
     } catch (error) {
+        console.error('Error updating category:', error);
         res.status(500).json({ message: error.message });
     }
 };
-
 
 module.exports = {
     getCategoriesHierarchy,
