@@ -151,6 +151,7 @@ const deleteCategoryById = async (req, res) => {
 };
 
 // Controller to update a category by ID
+// Controller to update a category by ID
 const updateCategory = async (req, res) => {
     try {
         const domain = req.headers['domain'];
@@ -158,9 +159,38 @@ const updateCategory = async (req, res) => {
             return res.status(400).json({ message: 'Domain header is required' });
         }
 
+        const { title } = req.body;
+
+        // Generate the base slug from the title if title is provided
+        let uniqueSlug = null;
+        if (title) {
+            const baseSlug = slugify(title, { lower: true, strict: true });
+            uniqueSlug = baseSlug;
+            let counter = 1;
+
+            // Check for existing slugs in the same domain
+            let existingCategory = await CategoryModel.findOne({
+                domain,
+                'categories.slug': uniqueSlug,
+                'categories._id': { $ne: req.params.id }  // Exclude the current category being updated
+            });
+
+            // Increment slug if it already exists
+            while (existingCategory) {
+                uniqueSlug = `${baseSlug}-${counter}`;
+                existingCategory = await CategoryModel.findOne({
+                    domain,
+                    'categories.slug': uniqueSlug,
+                    'categories._id': { $ne: req.params.id }  // Exclude the current category being updated
+                });
+                counter++;
+            }
+        }
+
+        // Update the category in the database
         const updatedCategory = await CategoryModel.findOneAndUpdate(
             { domain, 'categories._id': req.params.id },
-            { $set: { 'categories.$': req.body } },
+            { $set: { 'categories.$': { ...req.body, slug: uniqueSlug || req.body.slug } } }, // Keep existing slug if title is not updated
             { new: true }
         );
 
@@ -174,6 +204,7 @@ const updateCategory = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
 
 module.exports = {
     getCategoriesHierarchy,
