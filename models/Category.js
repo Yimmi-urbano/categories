@@ -8,7 +8,7 @@ const CategorySchema = new mongoose.Schema({
         {
             title: { type: String, required: true },
             icon_url: { type: String },
-            slug: { type: String, unique: true },
+            slug: { type: String },
             parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Categories', default: null }, // Reference to the parent category
             productCount: { type: Number, default: 0 } // Number of products in this category
         }
