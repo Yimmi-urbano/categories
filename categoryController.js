@@ -150,61 +150,76 @@ const deleteCategoryById = async (req, res) => {
     }
 };
 
-// Controller to update a category by ID
-// Controller to update a category by ID
 const updateCategory = async (req, res) => {
-    try {
-        const domain = req.headers['domain'];
-        if (!domain) {
-            return res.status(400).json({ message: 'Domain header is required' });
-        }
-
-        const { title } = req.body;
-
-        // Generate the base slug from the title if title is provided
-        let uniqueSlug = null;
-        if (title) {
-            const baseSlug = slugify(title, { lower: true, strict: true });
-            uniqueSlug = baseSlug;
-            let counter = 1;
-
-            // Check for existing slugs in the same domain
-            let existingCategory = await CategoryModel.findOne({
-                domain,
-                'categories.slug': uniqueSlug,
-                'categories._id': { $ne: req.params.id }  // Exclude the current category being updated
-            });
-
-            // Increment slug if it already exists
-            while (existingCategory) {
-                uniqueSlug = `${baseSlug}-${counter}`;
-                existingCategory = await CategoryModel.findOne({
-                    domain,
-                    'categories.slug': uniqueSlug,
-                    'categories._id': { $ne: req.params.id }  // Exclude the current category being updated
-                });
-                counter++;
-            }
-        }
-
-        // Update the category in the database
-        const updatedCategory = await CategoryModel.findOneAndUpdate(
-            { domain, 'categories._id': req.params.id },
-            { $set: { 'categories.$': { ...req.body, slug: uniqueSlug || req.body.slug } } }, // Keep existing slug if title is not updated
-            { new: true }
-        );
-
-        if (!updatedCategory) {
-            return res.status(404).json({ message: 'Category not found' });
-        }
-
-        res.json(updatedCategory);
-    } catch (error) {
-        console.error('Error updating category:', error);
-        res.status(500).json({ message: error.message });
+  try {
+    const domain = req.headers['domain'];
+    if (!domain) {
+      return res.status(400).json({ message: 'Domain header is required' });
     }
-};
 
+    const { title } = req.body;
+
+    // Buscar la categoría original para preservar el _id
+    const existingDoc = await CategoryModel.findOne(
+      { domain, 'categories._id': req.params.id },
+      { 'categories.$': 1 }
+    );
+
+    if (!existingDoc || !existingDoc.categories || existingDoc.categories.length === 0) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+
+    const existingCategory = existingDoc.categories[0];
+
+    // Generar slug único si se actualiza el título
+    let uniqueSlug = existingCategory.slug;
+    if (title && title !== existingCategory.title) {
+      const baseSlug = slugify(title, { lower: true, strict: true });
+      uniqueSlug = baseSlug;
+      let counter = 1;
+
+      let existingCategoryWithSlug = await CategoryModel.findOne({
+        domain,
+        'categories.slug': uniqueSlug,
+        'categories._id': { $ne: req.params.id }
+      });
+
+      while (existingCategoryWithSlug) {
+        uniqueSlug = `${baseSlug}-${counter}`;
+        existingCategoryWithSlug = await CategoryModel.findOne({
+          domain,
+          'categories.slug': uniqueSlug,
+          'categories._id': { $ne: req.params.id }
+        });
+        counter++;
+      }
+    }
+
+    // Preparar los nuevos datos de la categoría (sin cambiar el _id)
+    const updatedCategoryData = {
+      ...existingCategory.toObject(),
+      ...req.body,
+      slug: uniqueSlug,
+      _id: existingCategory._id // preservar el ID original
+    };
+
+    // Actualizar la categoría en la base de datos
+    const updatedDoc = await CategoryModel.findOneAndUpdate(
+      { domain, 'categories._id': req.params.id },
+      { $set: { 'categories.$': updatedCategoryData } },
+      { new: true }
+    );
+
+    if (!updatedDoc) {
+      return res.status(404).json({ message: 'Category not found after update' });
+    }
+
+    res.json(updatedDoc);
+  } catch (error) {
+    console.error('Error updating category:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
 module.exports = {
     getCategoriesHierarchy,
